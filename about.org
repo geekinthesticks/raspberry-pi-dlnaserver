@@ -31,7 +31,7 @@ be generated directly from the document using [[http://orgmode.org/worg/org-cont
 use Emacs, you will just have to resort to copy and paste!
 
 You can always get the most up to date version of this tutorial from
-[[https://github.com/geekinthesticks/raspberry-pi-dlnaserver][GitHub]] .
+[[https://github.com/geekinthesticks/raspberry-pi-dlnaserver][GitHub]] , which also included all the source code.
 
 * Overview.
 The system uses a raspberry Pi with a WiFi dongle and a usb external
@@ -48,7 +48,7 @@ via WiFi and not try to compete with the dhcp server on my home
 network. The ethernet interface is configured to use dhcp, so you can
 plug it into any network with a dhcp server.
 
-I have also installed hostapd, which allows the Pi to act as an
+I have also installed hostapd which allows the Pi to act as an
 access point and minidlna, which turns the Pi into a dlna server.
 
 Since I am using both a WiFi dongle and an external USB hard drive, I
@@ -78,17 +78,17 @@ I am using Raspbian, but the setup should work with most distros.
 
 ** Install required packages:
 
-#+BEGIN_SRC shell
+#+begin_src shell
 sudo apt-get install isc-dhcp-server hostapd minidnla
 
-#+END_SRC
+#+end_src
 
 
 ** Connect the External usb Disk.
 
 Check what device your hard drive is:
 
-#+BEGIN_SRC shell
+#+begin_src shell
 pi@mediapi ~ $ lsblk
 NAME        MAJ:MIN RM   SIZE RO TYPE MOUNTPOINT
 sda           8:0    0 232.9G  0 disk
@@ -98,21 +98,21 @@ mmcblk0     179:0    0  14.6G  0 disk
 └─mmcblk0p2 179:2    0  14.6G  0 part /
 
 
-#+END_SRC
+#+end_src
 
 In my case it's /dev/sda1.
 
 Make a directory and mount the drive:
 
-#+BEGIN_SRC shell
+#+begin_src shell
 sudo mkdir /mnt/sda1
 sudo mount /dev/sda1 /mnt
 
-#+END_SRC
+#+end_src
 
 To make the drive mount at boot modify /etc/fstab:
 
-#+BEGIN_SRC shell
+#+begin_src shell
 sudo nano /etc/fstab
 
 proc            /proc           proc    defaults          0       0
@@ -121,7 +121,7 @@ proc            /proc           proc    defaults          0       0
 
 # Mount our usb disk.
 /dev/sda1  /mnt/sda1               ext4    defaults,noatime  0       1
-#+END_SRC
+#+end_src
 
 ** Configuring the Wireless Access Point.
 The WiFi access point must have a static ip address, that is in a
@@ -134,7 +134,7 @@ independently via the WiFi interface.
 First check that your WiFi dongle can act as an Access
 Point (look for AP n the output):
 
-#+BEGIN_SRC sh
+#+begin_src sh
 sudo iw list
 
 Supported interface modes:
@@ -146,12 +146,12 @@ Supported interface modes:
                  ,* monitor
                  ,* mesh point
 
-#+END_SRC
+#+end_src
 
 
 Now edit /etc/network/interfaces:
 
-#+BEGIN_SRC sh
+#+begin_src sh :tangle ./code/network/interfaces :exports code :noweb yes
 auto lo
 
 iface lo inet loopback
@@ -164,21 +164,118 @@ iface wlan0 inet static
         netmask 255.255.255.0
         gateway 10.0.0.1
 
-#+END_SRC
+#+end_src
 
 
 Now we need to set up the dhcp server to hand out addresses to devices
 connected on the WiFi interface. Edit /etc/dhcp/dhcpd.conf:
 
+#+begin_src sh :tangle ./code/dhcp/dhcpd.conf :exports code :noweb yes
+
+#
+# Sample configuration file for ISC dhcpd for Debian
+#
+# $Id: dhcpd.conf,v 1.1.1.1 2002/05/21 00:07:44 peloy Exp $
+#
+
+# The ddns-updates-style parameter controls whether or not the server will
+# attempt to do a DNS update when a lease is confirmed. We default to the
+# behavior of the version 2 packages ('none', since DHCP v2 didn't
+# have support for DDNS.)
+# ddns-update-style none;
+ddns-updates on;
+ddns-update-style interim;
+ddns-rev-domainname "in-addr.arpa.";
+ignore client-updates;      # Overwrite client configured FQHNs
+
+
+ddns-domainname "bantercat.co.uk";
+
+# option definitions common to all supported networks...
+option domain-name "bantercat.co.uk";
+# option domain-name-servers firewall.banter.local;
+option domain-name-servers 8.8.8.8;
+
+default-lease-time 600;
+max-lease-time 7200;
+one-lease-per-client on;
+
+# If this DHCP server is the official DHCP server for the local
+# network, the authoritative directive should be uncommented.
+authoritative;
+
+# Use this to send dhcp log messages to a different log file (you also
+# have to hack syslog.conf to complete the redirection).
+log-facility local7;
+
+
+# include "/etc/rndc.key";
+
+
+
+subnet 10.0.0.0 netmask 255.255.255.0 {
+    pool {
+
+             range 10.0.0.10 10.0.0.100;
+             max-lease-time 1800; # 30 minutes
+             allow unknown-clients;
+    }
+
+    option routers 10.0.0.1;
+#    option subnet-mask 255.255.255.0;
+    option broadcast-address 10.0.0.255;
+
+}
+
+#subnet 192.168.0.0 netmask 255.255.255.0 {
+# --- default gateway
+#interface eth0;
+#option routers
+#10.0.0.1;
+# --- Netmask
+#option subnet-mask
+#255.255.255.0;
+# --- Broadcast Address
+option broadcast-address 192.168.0.255;
+# --- Domain name servers, tells the clients which DNS servers to use.
+#option domain-name-servers 10.0.0.1, 8.8.8.8, 8.8.4.4;
+#option time-offset 0;
+#range 192.168.0.100 192.168.0.200;
+#default-lease-time 1209600;
+#max-lease-time 1814400;
+#}
+
+#+end_src
+
 Next we need to configure hostapd. Edit /etc/hostapd.conf, replacing
 "yourpassphrase" and "ssid" with something suitable:
 
+#+begin_src sh :tangle ./code/hostapd/hostapd.conf :exports code :noweb yes
+interface=wlan0
+driver=nl80211
+logger_syslog=-1
+logger_syslog_level=2
+logger_stdout=-1
+logger_stdout_level=2
+ssid=mediapi
+hw_mode=g
+channel=6
+auth_algs=3
+max_num_sta=5
+wpa=2
+wpa_passphrase=testing123
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=TKIP CCMP
+rsn_pairwise=CCMP
+
+
+#+end_src
 
 Now reboot and log into the Pi, making sure it's still connected via
 the ethernet cable. Check that the wireless interface is up and
 running and configured to the correct address:
 
-#+BEGIN_SRC sh
+#+begin_src sh
 pi@mediapi ~ $ ifconfig wlan0
 wlan0     Link encap:Ethernet  HWaddr 7c:dd:90:30:99:02
           inet addr:10.0.0.1  Bcast:10.0.0.255  Mask:255.255.255.0
@@ -187,7 +284,7 @@ wlan0     Link encap:Ethernet  HWaddr 7c:dd:90:30:99:02
           TX packets:26 errors:0 dropped:0 overruns:0 carrier:0
           collisions:0 txqueuelen:1000
           RX bytes:0 (0.0 B)  TX bytes:7876 (7.6 KiB)
-#+END_SRC
+#+end_src
 
 Look carefully at the inet addr:10.0.0.1 to make sure its got the
 correct address.
@@ -201,6 +298,108 @@ Once you have established that you can connect to the WiFi access
 point, you can setup the minidlna server.
 
 Edit /etc/minidlna.conf
+
+#+begin_src sh :tangle ./code/minidlna/minidlna.conf :exports code :noweb yes
+# This is the configuration file for the MiniDLNA daemon, a DLNA/UPnP-AV media
+# server.
+#
+# Unless otherwise noted, the commented out options show their default value.
+#
+# On Debian, you can also refer to the minidlna.conf(5) man page for
+# documentation about this file.
+
+
+# Path to the directory you want scanned for media files.
+#
+# This option can be specified more than once if you want multiple directories
+# scanned.
+#
+# If you want to restrict a media_dir to a specific content type, you can
+# prepend the directory name with a letter representing the type (A, P or V),
+# followed by a comma, as so:
+#   * "A" for audio    (eg. media_dir=A,/var/lib/minidlna/music)
+#   * "P" for pictures (eg. media_dir=P,/var/lib/minidlna/pictures)
+#   * "V" for video    (eg. media_dir=V,/var/lib/minidlna/videos)
+#
+# WARNING: After changing this option, you need to rebuild the database. Either
+#          run minidlna with the '-R' option, or delete the 'files.db' file
+#          from the db_dir directory (see below).
+#          On Debian, you can run, as root, 'service minidlna force-reload' instead.
+media_dir=V,/media/videos
+media_dir=V,/mnt/sda1/video_recordings
+
+
+
+# Path to the directory that should hold the database and album art cache.
+#db_dir=/var/lib/minidlna
+
+# Path to the directory that should hold the log file.
+#log_dir=/var/log
+
+# Minimum level of importance of messages to be logged.
+# Must be one of "off", "fatal", "error", "warn", "info" or "debug".
+# "off" turns of logging entirely, "fatal" is the highest level of importance
+# and "debug" the lowest.
+#log_level=warn
+
+# Use a different container as the root of the directory tree presented to
+# clients. The possible values are:
+#   * "." - standard container
+#   * "B" - "Browse Directory"
+#   * "M" - "Music"
+#   * "P" - "Pictures"
+#   * "V" - "Video"
+# if you specify "B" and client device is audio-only then "Music/Folders" will be used as root
+#root_container=.
+
+# Network interface(s) to bind to (e.g. eth0), comma delimited.
+network_interface=eth0,wlan0
+
+# IPv4 address to listen on (e.g. 192.0.2.1).
+#listening_ip=
+
+# Port number for HTTP traffic (descriptions, SOAP, media transfer).
+port=8200
+
+# URL presented to clients.
+# The default is the IP address of the server on port 80.
+#presentation_url=http://example.com:80
+
+# Name that the DLNA server presents to clients.
+#friendly_name=
+
+# Serial number the server reports to clients.
+serial=12345678
+
+# Model name the server reports to clients.
+#model_name=Windows Media Connect compatible (MiniDLNA)
+
+# Model number the server reports to clients.
+model_number=1
+
+# Automatic discovery of new files in the media_dir directory.
+#inotify=yes
+
+# List of file names to look for when searching for album art. Names should be
+# delimited with a forward slash ("/").
+album_art_names=Cover.jpg/cover.jpg/AlbumArtSmall.jpg/albumartsmall.jpg/AlbumArt.jpg/albumart.jpg/Album.jpg/album.jpg/Folder.jpg/folder.jpg/Thumb.jpg/thumb.jpg
+
+# Strictly adhere to DLNA standards.
+# This allows server-side downscaling of very large JPEG images, which may
+# decrease JPEG serving performance on (at least) Sony DLNA products.
+#strict_dlna=no
+
+# Support for streaming .jpg and .mp3 files to a TiVo supporting HMO.
+#enable_tivo=no
+
+# Notify interval, in seconds.
+#notify_interval=895
+
+# Path to the MiniSSDPd socket, for MiniSSDPd support.
+#minissdpdsocket=/run/minissdpd.sock
+
+#+end_src
+
 
 The parts you need to edit are shown above. Note that media_dir
 should be the path to the directories usb hard disk containing your
@@ -237,8 +436,6 @@ to turn off your Pi. I based my circuit on [[http://www.3cc.org/blog/2013/01/ras
 Holding the push button down for more than a second will shutdown the server.
 
 ** Web Server Off Switch.
-Note this part of the code is still experimental, there are bugs!
-
 As you are probably already using your phone/tablet, you may want to
 use it to turn off the Pi. This is slightly tricky for a couple of
 reasons. First most web servers are specifically designed to make it
@@ -259,21 +456,156 @@ restarts in case of an error.
 
 First you need to install NodeJS and its package manager npm:
 
-#+BEGIN_SRC sh
+#+begin_src sh
 sudo apt-get install nodejs npm
-#+END_SRC
+#+end_src
 
 Once NodeJS is installed you will need to install some node
 packages. Change to the directory where you installed server.js:
 
-#+BEGIN_SRC sh
+#+begin_src sh
 npm install node-static
-#+END_SRC
+#+end_src
 
 Create the server.js file in the same directory:
+#+begin_src js :tangle ./code/nodejs/server.js :exports code :noweb yes
+
+var http = require('http');
+var nodestatic = require('node-static');
+var sys = require('util');
+var path = require('path');
+var url = require('url');
+var exec = require('child_process').exec;
+filesys = require("fs");
+
+// Setup static server for current directory
+var staticServer = new nodestatic.Server(".");
+
+// Get temperature records from database
+
+
+
+
+// Setup node http server
+var server = http.createServer(
+    // Our main server function
+
+
+    function(request, response)
+    {
+        // Grab the URL requested by the client and parse any query options
+        //var url = require('url').parse(request.url, true);
+        var pathfile = url.pathname;
+        var my_path = url.parse(request.url).pathname;
+        var full_path =  path.join(process.cwd(),my_path);
+        var query = url.query;
+        var shutdown = "/shutdown";
+
+        console.log('my_path: ' + my_path);
+
+        if (my_path == '/shutdown'){
+            console.log('Shutting down server');
+            response.writeHead(200);
+            child = exec("sudo shutdown -h now", function (error, stdout, stderr) {
+                response.end("Shutdown...");
+            return;
+            });
+        }
+
+      // Serve index file.
+        if (my_path == '/'){
+            console.log('Requesting index file');
+            path.exists(full_path + 'index.html',function(exists){
+                if(!exists){
+                    console.log('Error: index.html not found');
+                    response.writeHeader(404, {"Content-Type": "text/plain"});
+                    response.write("404 Not Found\n");
+                    response.end();
+                }
+                else{
+
+                    //response.writeHead(200, { "Content-type": "text/plain" });
+                    filesys.readFile(full_path + 'index.html', "binary", function(err, file) {
+
+                        if(err) {
+                            response.writeHeader(500, {"Content-Type": "text/plain"});
+                            response.write(err + "\n");
+                            response.end();
+
+                        }
+                        else{
+                            response.writeHeader(200);
+                            response.write(file, "binary");
+                            response.end();
+                                               }
+                    });
+
+                }
+            });
+        }
+
+
+
+
+
+
+
+      // Handler for favicon.ico requests
+        if (pathfile == '/favicon.ico'){
+            response.writeHead(200, {'Content-Type': 'image/x-icon'});
+            response.end();
+
+            // Optionally log favicon requests.
+            //console.log('favicon requested');
+            return;
+        }
+
+
+        else {
+            // Print requested file to terminal
+            console.log('Request from '+ request.connection.remoteAddress +' for: ' + pathfile);
+
+            // Serve file using node-static
+            staticServer.serve(request, response, function (err, result) {
+                if (err){
+                    // Log the error
+                    sys.error("Error serving " + request.url + " - " + err.message);
+
+                    // Respond to the client
+                    response.writeHead(err.status, err.headers);
+                    response.end('Error 404 - file not found');
+                    return;
+                }
+                return;
+            })
+        }
+    });
+
+server.listen(8080);
+// Log message
+console.log('Server running at http://localhost:8080');
+
+#+end_src
 
 Now create index.html in the same directory as node.js. Note this
 index.html is very basic, feel free to jazz it up
+
+#+begin_src html :tangle ./code/html/index.html :exports code :noweb yes
+<html>
+<head>
+
+</head>
+
+<body>
+<p>Hello world!</p>
+<p>
+  <a href="/shutdown" class="danger">Shutdown</a>
+  </p>
+</body>
+
+</html>
+
+#+end_src
 
 To run the server:
 
