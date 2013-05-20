@@ -1,0 +1,293 @@
+#+STARTUP: showall indent
+#+STARTUP: hidestars
+#+OPTIONS: H:2 num:nil tags:nil toc:nil timestamps:nil
+
+* Introduction.
+If you have children, you will recognise the "Are we nearly there"
+syndrome. This happens on long car journeys, usually starting only a
+few minutes after setting off and repeating at frequent intervals. If
+you have three children, it's like listening to a quadraphonic
+speaker setup with one of the speakers missing.
+
+In pre-gadget days, when I was a child we used to play endless games
+of "I Spy". Whilst this is still fun, it does get a bit tedious after
+three of four hours. Now most children will have some sort of gadget
+that lets them play games, or watch a video. On problem with videos
+is that the one they insist on watching isn't on their phone/tablet
+and even if they had though to put it on their phone before leaving
+home, it's still quite a faff.
+
+However, for the open source tinkerer there is a solution at
+hand. How about creating a Wifi access point inside the car connected
+to a box that streams video. If you already have most of the bits,
+this isn't too expensive and given a big enough hard disk you can
+take almost your whole video collection with you. Even better if you
+arrive somewhere with no TV, you can simply take the whole setup
+inside with you and carry on watching videos.
+
+* Using This Document.
+This document is written using Emacs [[http://org-mode.org][org-mode]] . The source files can
+be generated directly from the document using [[http://orgmode.org/worg/org-contrib/babel/][Babel]] . If you don't
+use Emacs, you will just have to resort to copy and paste!
+
+You can always get the most up to date version of this tutorial from
+[[https://github.com/geekinthesticks/raspberry-pi-dlnaserver][GitHub]] .
+
+* Overview.
+The system uses a raspberry Pi with a WiFi dongle and a usb external
+hard drive. The Pi is configured as a WiFi access point using a WiFi dongle, while the
+ethernet interface is configured on a separate network, which can
+connect to my home router. This allows
+me to connect to the access point with your phone, but still just plug the Pi into
+my home network using an ethernet cable.
+
+I installed a dhcp server on the Pi to give out addresses to clients
+connected to the WiFi interface. This server only listens on the WiFi
+interface, so will only hand out dhcp addresses to devices connected
+via WiFi and not try to compete with the dhcp server on my home
+network. The ethernet interface is configured to use dhcp, so you can
+plug it into any network with a dhcp server.
+
+I have also installed hostapd, which allows the Pi to act as an
+access point and minidlna, which turns the Pi into a dlna server.
+
+Since I am using both a WiFi dongle and an external USB hard drive, I
+am powering the Pi via a powered hub. You should check the
+specifications of your hub to make sure it can power the Pi.
+
+To power the powered hub in the car I am using a Universal Battery
+Elimination Circuit (UBEC). This converts this 12v from the car
+battery and provides a 5v 3 amp output. I will also provide some
+protection from voltage and current spikes. These are available for
+about £6 on eBay.
+
+* Hardware.
+- Raspberry Pi
+- Wifi Card
+- Powered hub capable of powering the Pi from the hub itself.
+- External bus powered usb drive
+- Resistors 1x10k and 1x1k
+- Momentary switch
+- UBEC
+- Some sort of box to hold the Pi hard drive and hub (Tupperware)
+- Jack plug and socket
+
+
+* Setting Up the Server.
+I am using Raspbian, but the setup should work with most distros.
+
+** Install required packages:
+
+#+BEGIN_SRC shell
+sudo apt-get install isc-dhcp-server hostapd minidnla
+
+#+END_SRC
+
+
+** Connect the External usb Disk.
+
+Check what device your hard drive is:
+
+#+BEGIN_SRC shell
+pi@mediapi ~ $ lsblk
+NAME        MAJ:MIN RM   SIZE RO TYPE MOUNTPOINT
+sda           8:0    0 232.9G  0 disk
+└─sda1        8:1    0 232.9G  0 part /mnt/sda1
+mmcblk0     179:0    0  14.6G  0 disk
+├─mmcblk0p1 179:1    0    56M  0 part /boot
+└─mmcblk0p2 179:2    0  14.6G  0 part /
+
+
+#+END_SRC
+
+In my case it's /dev/sda1.
+
+Make a directory and mount the drive:
+
+#+BEGIN_SRC shell
+sudo mkdir /mnt/sda1
+sudo mount /dev/sda1 /mnt
+
+#+END_SRC
+
+To make the drive mount at boot modify /etc/fstab:
+
+#+BEGIN_SRC shell
+sudo nano /etc/fstab
+
+proc            /proc           proc    defaults          0       0
+/dev/mmcblk0p1  /boot           vfat    defaults          0       2
+/dev/mmcblk0p2  /               ext4    defaults,noatime  0       1
+
+# Mount our usb disk.
+/dev/sda1  /mnt/sda1               ext4    defaults,noatime  0       1
+#+END_SRC
+
+** Configuring the Wireless Access Point.
+The WiFi access point must have a static ip address, that is in a
+different subnet to your home network. My home network uses the
+192.168.0.0 range of addresses, so I setup the WiFi interface to use
+10.0.0.1. This means that you can just plug in the Pi to your home
+network to copy files, but minidlna can serve media files
+independently via the WiFi interface.
+
+First check that your WiFi dongle can act as an Access
+Point (look for AP n the output):
+
+#+BEGIN_SRC sh
+sudo iw list
+
+Supported interface modes:
+                 ,* IBSS
+                 ,* managed
+                 ,* AP
+                 ,* AP/VLAN
+                 ,* WDS
+                 ,* monitor
+                 ,* mesh point
+
+#+END_SRC
+
+
+Now edit /etc/network/interfaces:
+
+#+BEGIN_SRC sh
+auto lo
+
+iface lo inet loopback
+iface eth0 inet dhcp
+
+
+auto wlan0
+iface wlan0 inet static
+        address 10.0.0.1
+        netmask 255.255.255.0
+        gateway 10.0.0.1
+
+#+END_SRC
+
+
+Now we need to set up the dhcp server to hand out addresses to devices
+connected on the WiFi interface. Edit /etc/dhcp/dhcpd.conf:
+
+Next we need to configure hostapd. Edit /etc/hostapd.conf, replacing
+"yourpassphrase" and "ssid" with something suitable:
+
+
+Now reboot and log into the Pi, making sure it's still connected via
+the ethernet cable. Check that the wireless interface is up and
+running and configured to the correct address:
+
+#+BEGIN_SRC sh
+pi@mediapi ~ $ ifconfig wlan0
+wlan0     Link encap:Ethernet  HWaddr 7c:dd:90:30:99:02
+          inet addr:10.0.0.1  Bcast:10.0.0.255  Mask:255.255.255.0
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:26 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000
+          RX bytes:0 (0.0 B)  TX bytes:7876 (7.6 KiB)
+#+END_SRC
+
+Look carefully at the inet addr:10.0.0.1 to make sure its got the
+correct address.
+
+If you look in your wireless manager app, you should see a new access
+point called "mediapi". You can try connecting to it - the password
+is whatever you set in hostapd.conf.
+
+** Configuring the minidlna Server.
+Once you have established that you can connect to the WiFi access
+point, you can setup the minidlna server.
+
+Edit /etc/minidlna.conf
+
+The parts you need to edit are shown above. Note that media_dir
+should be the path to the directories usb hard disk containing your
+media. In the example above, I have got one directory for video files
+and one for audio files. I have also configured it to serve media on
+both the ethernet and wireless interfaces.
+
+Now you can test the dnla server. With my Android phone I use
+[[https://play.google.com/store/apps/details?id=com.dbapp.android.mediahouse&hl=en][MediaHouse]]  . You should be able to connect via your home network if
+the server is plugged into your router via  the ethernet cable. Now
+see if you can see a new Wireless Access Point called "mediapi" on
+your Android phone and try connecting to it. You should then be able
+to browse your media using MediaHouse.
+
+
+** Connecting the UBEC.
+Before you try to do this double check to make sure you know what you
+are doing. If you fry your car electrics, or the Pi don't blame me.
+
+I have cut the power cable between my powered usb hub between the
+power brick and the hub. I have put a jack socket on one end of the
+cable and a plug on the other end. Make sure you don't get the
+polarities mixed up. This allows me to disconnect the wall wart and
+plug the output from the UBEC into the powered hub input, which is
+5v. If I want to use the unit in the house, I just unplug the UBEC
+and plug the jack plug from the wall wart back in.
+
+** Hardware Off Switch.
+There is one final problem. How to turn off the Pi in the car,
+without simply pulling the plug which may well corrupt your USB
+card. There are several tutorials on the web showing how to use GPIO
+to turn off your Pi. I based my circuit on [[http://www.3cc.org/blog/2013/01/raspberry-pi-shutdown-switch-safely-turning-off-the-pi/][this]] article.
+
+Holding the push button down for more than a second will shutdown the server.
+
+** Web Server Off Switch.
+Note this part of the code is still experimental, there are bugs!
+
+As you are probably already using your phone/tablet, you may want to
+use it to turn off the Pi. This is slightly tricky for a couple of
+reasons. First most web servers are specifically designed to make it
+hard to execute commands like turning off your computer. Secondly
+servers like Apache consume a lot of resources to use for something as
+simple as just turning off your computer.
+
+Luckily we can use NodeJS, which is lightweight and can be run as the
+pi user, so can run sudo commands without requiring a password. The
+app just displays a single page with a Shutdown button, that does
+what it says on the tin.
+
+You are already connected to the Pi via WiFi, so you just need to
+browse to http://localhost:8080 . You can change the port by modifying
+the NodeJS app. By default the NodeJS app may crash if it encounters
+an error. However, we can use the [[http://blog.nodejitsu.com/keep-a-nodejs-server-up-with-forever][forever]] app to make sure NodeJS
+restarts in case of an error.
+
+First you need to install NodeJS and its package manager npm:
+
+#+BEGIN_SRC sh
+sudo apt-get install nodejs npm
+#+END_SRC
+
+Once NodeJS is installed you will need to install some node
+packages. Change to the directory where you installed server.js:
+
+#+BEGIN_SRC sh
+npm install node-static
+#+END_SRC
+
+Create the server.js file in the same directory:
+
+Now create index.html in the same directory as node.js. Note this
+index.html is very basic, feel free to jazz it up
+
+To run the server:
+
+#+begin_src
+nodejs server.js
+#+end_src
+
+If you are connected to your local network via ethernet you can
+open the webpage at http://ip_address_of_your_pi/ . If you are
+connected via the WiFi dongle on the Pi the url is http://localhost/ .
+
+
+
+* Final Thoughts.
+Streaming videos isn't the only thing I plan to do. By adding a usb
+3G dongle I can also use it as a portable WiFi internet
+hotspot. However, the details are for another post.
